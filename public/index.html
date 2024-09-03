@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiauCode Chat</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
+        #header { text-align: center; padding: 10px; background-color: #007bff; color: white; }
+        #warning { text-align: center; color: red; margin: 10px; }
+        ul { list-style-type: none; padding: 0; margin: 0; flex: 1; overflow-y: auto; }
+        li { margin-bottom: 10px; padding: 10px; border-radius: 10px; display: flex; max-width: 70%; }
+        .message { display: inline-block; padding: 10px; border-radius: 10px; }
+        .message.left { background-color: #f1f1f1; align-self: flex-start; }
+        .message.right { background-color: #007bff; color: white; align-self: flex-end; }
+        #message-form { display: flex; margin: 10px; }
+        #message-form input, #message-form button { padding: 10px; border-radius: 10px; }
+        #message-form input { flex: 1; border: 1px solid #ddd; }
+        #message-form button { background-color: #28a745; color: white; border: none; cursor: pointer; }
+        #username-form { margin: 10px; }
+        #username-form input, #username-form button { padding: 10px; border-radius: 10px; }
+        #username-form input { border: 1px solid #ddd; }
+        #username-form button { background-color: #28a745; color: white; border: none; cursor: pointer; }
+        #image-form { display: flex; margin: 10px; }
+        #image-form input { flex: 1; border: 1px solid #ddd; }
+        #image-form button { background-color: #007bff; color: white; border: none; cursor: pointer; }
+        .notification { color: red; font-weight: bold; }
+        #user-list { margin: 10px; }
+        #user-list ul { padding: 0; list-style-type: none; }
+    </style>
+</head>
+<body>
+    <div id="header">MiauCode Chat</div>
+    <div id="warning">Los mensajes son instantáneos y se eliminan si recargas la página.</div>
+    <div id="username-container">
+        <form id="username-form">
+            <input id="username" placeholder="Introduce tu nombre" required />
+            <button>Unirse al Chat</button>
+        </form>
+    </div>
+    <ul id="messages"></ul>
+    <form id="message-form" style="display:none;">
+        <input id="m" autocomplete="off" placeholder="Escribe un mensaje" required />
+        <button>Enviar</button>
+    </form>
+    <form id="image-form" style="display:none;">
+        <input type="file" id="imageInput" accept="image/*" />
+        <button>Enviar Imagen</button>
+    </form>
+    <div id="user-list" style="display:none;">
+        <b>Usuarios en línea:</b>
+        <ul id="users"></ul>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        var socket = io();
+        var usernameForm = document.getElementById('username-form');
+        var usernameInput = document.getElementById('username');
+        var messageForm = document.getElementById('message-form');
+        var messageInput = document.getElementById('m');
+        var messages = document.getElementById('messages');
+        var imageForm = document.getElementById('image-form');
+        var imageInput = document.getElementById('imageInput');
+        var userList = document.getElementById('user-list');
+        var usersList = document.getElementById('users');
+
+        usernameForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var username = usernameInput.value.trim();
+            if (username) {
+                socket.emit('set username', username);
+                document.getElementById('username-container').style.display = 'none';
+                messageForm.style.display = 'flex';
+                imageForm.style.display = 'flex';
+                userList.style.display = 'block';
+            }
+        });
+
+        messageForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (messageInput.value) {
+                socket.emit('chat message', messageInput.value);
+                messageInput.value = '';
+            }
+        });
+
+        imageForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var file = imageInput.files[0];
+            if (file) {
+                var reader = new FileReader();
+                reader.onloadend = function() {
+                    socket.emit('send image', reader.result);
+                    imageInput.value = '';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        socket.on('chat message', function(data) {
+            var item = document.createElement('li');
+            var messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(data.username === (usernameInput.value.trim() || 'Anónimo') ? 'right' : 'left');
+            messageDiv.innerHTML = `<b>${data.username}:</b> ${parseEmojis(data.msg)}`;
+            messageDiv.style.backgroundColor = data.color.background;
+            messageDiv.style.color = data.color.text;
+            item.appendChild(messageDiv);
+            messages.appendChild(item);
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        socket.on('notification', function(data) {
+            var item = document.createElement('li');
+            item.classList.add('notification');
+            item.textContent = data.msg;
+            messages.appendChild(item);
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        socket.on('user list', function(users) {
+            usersList.innerHTML = '';
+            users.forEach(user => {
+                var userItem = document.createElement('li');
+                userItem.textContent = user;
+                usersList.appendChild(userItem);
+            });
+        });
+
+        function parseEmojis(text) {
+            // Simple emoji parsing - you can extend this as needed
+            const emojis = {
+                ':)': '😊',
+                ':(': '😢',
+                ':D': '😁'
+            };
+            return text.replace(/:\)|:\(|:D/g, match => emojis[match] || match);
+        }
+
+        function suggestUsers(text) {
+            const mentionRegex = /@(\w*)/g;
+            const match = mentionRegex.exec(text);
+            if (match) {
+                const prefix = match[1];
+                if (prefix) {
+                    const suggestions = Array.from(usersList.children)
+                        .filter(item => item.textContent.toLowerCase().startsWith(prefix.toLowerCase()))
+                        .map(item => item.textContent);
+                    return suggestions;
+                }
+            }
+            return [];
+        }
+
+        messageInput.addEventListener('input', function() {
+            const suggestions = suggestUsers(messageInput.value);
+            // Display user suggestions - implement UI as needed
+            console.log('User suggestions:', suggestions);
+        });
+    </script>
+</body>
+</html>
+
